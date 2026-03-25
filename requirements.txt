@@ -1,0 +1,10 @@
+# Ignorar el modelo local
+cerebro_sensores.joblib
+*.joblib
+
+# Ignorar carpetas de caché de Python
+__pycache__/
+*.pyc
+
+# Ignorar variables de entorno locales (si las llegas a usar)
+.env
