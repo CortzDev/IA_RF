@@ -10,6 +10,7 @@ import threading
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
+from fastapi.responses import FileResponse # Para poder descargar el modelo
 
 # Configuración de variables con la URL directa
 DB_URL = "postgresql://postgres:VaLqxGBzdzZmBTddchzzryKgNeQmoPfI@switchback.proxy.rlwy.net:14573/railway?sslmode=require"
@@ -71,6 +72,7 @@ def fusion_ia_monitor():
     
     try:
         conn = psycopg2.connect(DB_URL)
+        conn.autocommit = True # 👈 ¡AQUÍ ESTÁ LA LÍNEA QUE LO ARREGLA TODO!
         cursor = conn.cursor(cursor_factory=RealDictCursor)
         cursor.execute("SELECT id FROM sensor_metrics ORDER BY id DESC LIMIT 1;")
         row = cursor.fetchone()
@@ -94,7 +96,8 @@ def fusion_ia_monitor():
                         VALUES (%s, %s, %s, %s, %s)
                     """, (sensor, valor_real, valor_predicho, diferencia, estado_booleano))
                 
-                conn.commit() 
+                # El commit manual ya no es estrictamente necesario aquí por el autocommit=True,
+                # pero es una buena práctica dejarlo en transacciones de escritura.
                 
                 nuevos_datos_X = pd.DataFrame([{
                     **{s: registro[s] for s in sensores}, 
@@ -125,6 +128,7 @@ def fusion_ia_monitor():
 # ==========================================
 app = FastAPI(title="API Sensores IA")
 
+# Permite que tu HTML consulte esta API sin bloqueos de seguridad (CORS)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], 
@@ -139,6 +143,7 @@ def home():
 
 @app.get("/api/estadisticas")
 def obtener_estadisticas():
+    # Esta es la ruta a la que tu HTML hará la petición
     try:
         conn = psycopg2.connect(DB_URL)
         cursor = conn.cursor(cursor_factory=RealDictCursor)
@@ -160,7 +165,6 @@ def obtener_estadisticas():
     except Exception as e:
         return {"error": str(e)}
 
-# --- NUEVA RUTA PARA EL HISTORIAL INTERACTIVO ---
 @app.get("/api/historial")
 def obtener_historial():
     try:
@@ -178,7 +182,7 @@ def obtener_historial():
         cursor.close()
         conn.close()
 
-        # Agrupamos los datos de 5 en 5
+        # Agrupamos los datos de 5 en 5 (ya que cada lectura tiene 5 sensores)
         historial_agrupado = []
         numero_prediccion = len(logs) // 5
 
@@ -196,13 +200,22 @@ def obtener_historial():
     except Exception as e:
         return {"error": str(e)}
 
+@app.get("/api/descargar-modelo")
+def descargar_modelo():
+    if os.path.exists(RUTA_MODELO):
+        return FileResponse(RUTA_MODELO, media_type='application/octet-stream', filename='mi_ia_entrenada.joblib')
+    else:
+        return {"error": "El modelo aún no se ha creado."}
+
 # ==========================================
 # 3. ARRANQUE DEL SISTEMA UNIFICADO
 # ==========================================
 if __name__ == "__main__":
+    # 1. Arrancamos el motor de la IA en un "hilo" de fondo para que no bloquee
     hilo_ia = threading.Thread(target=fusion_ia_monitor, daemon=True)
     hilo_ia.start()
     
+    # 2. Arrancamos el servidor web en el puerto que asigne Railway
     puerto = int(os.environ.get("PORT", 8000))
     print(f"🌐 Iniciando servidor web en el puerto {puerto}...")
     uvicorn.run(app, host="0.0.0.0", port=puerto)
