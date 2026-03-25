@@ -10,7 +10,7 @@ import threading
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
-from fastapi.responses import FileResponse
+from datetime import datetime
 
 # ==========================================
 # CONFIGURACIÓN
@@ -23,32 +23,26 @@ def cargar_y_entrenar(engine):
     print("🧠 Entrenando modelo con datos históricos...", flush=True)
     query = "SELECT * FROM sensor_metrics ORDER BY recorded_at ASC"
     df = pd.read_sql(query, engine)
-    
     for s in sensores:
         df[f'{s}_pasado'] = df[s].shift(1)
         df[f'{s}_futuro'] = df[s].shift(-1)
-        
     df_train = df.dropna()
     columnas_X = sensores + [f'{s}_pasado' for s in sensores]
     columnas_Y = [f'{s}_futuro' for s in sensores]
-    
     modelo = RandomForestRegressor(n_estimators=50, random_state=42, n_jobs=-1)
     modelo.fit(df_train[columnas_X], df_train[columnas_Y])
-    
     os.makedirs(os.path.dirname(RUTA_MODELO), exist_ok=True)
     joblib.dump(modelo, RUTA_MODELO)
-    print("✅ Modelo entrenado y guardado en volumen.", flush=True)
-    
     return modelo, columnas_X, df.iloc[-1:][columnas_X].copy()
 
 def fusion_ia_monitor():
     print("🚀 Iniciando servicios de inteligencia artificial...", flush=True)
     engine = create_engine(DB_URL)
+    proximo_latido = time.time() + 300 # Programar primer latido en 5 min
     
     while True:
         try:
             if os.path.exists(RUTA_MODELO):
-                print("📦 Cargando cerebro de la IA desde el volumen...", flush=True)
                 modelo = joblib.load(RUTA_MODELO)
                 query = "SELECT * FROM sensor_metrics ORDER BY recorded_at DESC LIMIT 2"
                 df_reciente = pd.read_sql(query, engine).sort_values(by='recorded_at')
@@ -57,76 +51,57 @@ def fusion_ia_monitor():
                 columnas_X = sensores + [f'{s}_pasado' for s in sensores]
                 datos_actuales = df_reciente.iloc[-1:][columnas_X].copy()
             else:
-                print("🌱 Iniciando primer entrenamiento del sistema...", flush=True)
                 modelo, columnas_X, datos_actuales = cargar_y_entrenar(engine)
 
             prediccion_actual = modelo.predict(datos_actuales)[0]
-            
-            conn = psycopg2.connect(DB_URL)
-            conn.autocommit = True 
+            conn = psycopg2.connect(DB_URL); conn.autocommit = True 
             cursor = conn.cursor(cursor_factory=RealDictCursor)
-            
             cursor.execute("SELECT id FROM sensor_metrics ORDER BY id DESC LIMIT 1;")
             last_id = cursor.fetchone()['id']
-            
-            print(f"✅ Conexión establecida. Monitoreando desde ID: {last_id}", flush=True)
-            
-            nuevos_registros_count = 0
+            print(f"✅ Sistema en línea. Monitoreando desde ID: {last_id}", flush=True)
             
             while True:
+                # 1. BUSCAR DATOS REALES
                 cursor.execute("SELECT * FROM sensor_metrics WHERE id > %s ORDER BY id ASC;", (last_id,))
                 nuevos = cursor.fetchall()
                 
-                if not nuevos:
-                    print("🔍 Escaneando base de datos: buscando nuevas lecturas...", flush=True)
-                
-                for registro in nuevos:
-                    print(f"✨ Nueva lectura detectada: reading_id={registro['id']} at {pd.Timestamp.now()}", flush=True)
-                    
+                if nuevos:
+                    for registro in nuevos:
+                        print(f"✨ Nueva lectura detectada: id={registro['id']}", flush=True)
+                        for i, s in enumerate(sensores):
+                            v_real, v_pred = float(registro[s]), float(prediccion_actual[i])
+                            error = abs(v_real - v_pred)
+                            acierto = bool(error <= (abs(v_real) * 0.05))
+                            cursor.execute("INSERT INTO predicciones_log (sensor, valor_real, valor_predicho, margen_error, acertado) VALUES (%s, %s, %s, %s, %s)", (s, v_real, v_pred, error, acierto))
+                            print(f"   ✅ {s.upper()}: {v_real} | IA: {v_pred:.2f}", flush=True)
+                        last_id = registro['id']
+                        proximo_latido = time.time() + 300 # Resetear cronómetro de 5 min
+
+                # 2. MODO AUTO-DIAGNÓSTICO (Cada 5 minutos si no hay datos)
+                elif time.time() >= proximo_latido:
+                    print(f"💓 Latido periódico: Generando predicción de prueba para asegurar conexión...", flush=True)
                     for i, s in enumerate(sensores):
-                        v_real = float(registro[s])
+                        # Usamos el último valor conocido para simular una entrada
+                        v_simulado = datos_actuales[s].values[0]
                         v_pred = float(prediccion_actual[i])
-                        error = abs(v_real - v_pred)
-                        acierto = bool(error <= (abs(v_real) * 0.05))
-                        
-                        cursor.execute("""
-                            INSERT INTO predicciones_log (sensor, valor_real, valor_predicho, margen_error, acertado)
-                            VALUES (%s, %s, %s, %s, %s)
-                        """, (s, v_real, v_pred, error, acierto))
-                        
-                        icon = "✅" if acierto else "⚠️"
-                        print(f"   {icon} Procesando {s}: Real={v_real} | IA={v_pred:.2f}", flush=True)
+                        cursor.execute("INSERT INTO predicciones_log (sensor, valor_real, valor_predicho, margen_error, acertado) VALUES (%s, %s, %s, %s, %s)", (s + " (TEST)", v_simulado, v_pred, 0, True))
+                    print("💓 Prueba de escritura en DB exitosa.", flush=True)
+                    proximo_latido = time.time() + 300 # Programar siguiente en 5 min
+                
+                else:
+                    print("🔍 Escaneando base de datos...", flush=True)
 
-                    # Preparar siguiente
-                    nuevos_X = pd.DataFrame([{
-                        **{s: registro[s] for s in sensores}, 
-                        **{f'{s}_pasado': datos_actuales[s].values[0] for s in sensores} 
-                    }], columns=columnas_X)
-                    
-                    prediccion_actual = modelo.predict(nuevos_X)[0]
-                    datos_actuales = nuevos_X
-                    last_id = registro['id']
-                    nuevos_registros_count += 1
-                    
-                    if nuevos_registros_count >= 50:
-                        print("🔄 Reentrenamiento periódico: actualizando IA con nuevos datos...", flush=True)
-                        modelo, columnas_X, datos_actuales = cargar_y_entrenar(engine)
-                        nuevos_registros_count = 0
-
-                time.sleep(10) 
+                time.sleep(15) # Revisar cada 15 segundos
                 
         except Exception as e:
-            print(f"❌ Error en el servicio: {e}. Reintentando...", flush=True)
-            time.sleep(15)
+            print(f"❌ Error: {e}. Reintentando...", flush=True)
+            time.sleep(20)
 
 # ==========================================
-# SERVIDOR WEB
+# API Y ARRANQUE
 # ==========================================
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
-
-@app.get("/")
-def home(): return {"status": "online"}
 
 @app.get("/api/estadisticas")
 def stats():
@@ -144,11 +119,9 @@ def historial():
     hist = []
     for i in range(0, len(logs), 5):
         g = logs[i:i+5]
-        if g: hist.append({"nombre": f"Lectura #{ (len(logs)//5) - (i//5) }", "fecha": g[0]['fecha'], "datos": g})
+        if g: hist.append({"nombre": f"Lectura", "fecha": g[0]['fecha'], "datos": g})
     return hist
 
 if __name__ == "__main__":
     threading.Thread(target=fusion_ia_monitor, daemon=True).start()
-    puerto = int(os.environ.get("PORT", 8080))
-    print(f"🌐 Servidor web iniciado en puerto {puerto}", flush=True)
-    uvicorn.run(app, host="0.0.0.0", port=puerto)
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
