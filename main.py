@@ -10,14 +10,15 @@ import threading
 from flask import Flask, jsonify, send_file
 from flask_cors import CORS
 import logging
+import sys # <-- Importamos sys
 
 # ==========================================
-# CONFIGURACIÓN DE LOGS (Para ver todo en Railway)
+# CONFIGURACIÓN DE LOGS (Corregido para Railway)
 # ==========================================
 logging.basicConfig(
     level=logging.INFO, 
     format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[logging.StreamHandler()] # Asegura que salga a la consola
+    handlers=[logging.StreamHandler(sys.stdout)] # <-- Forzamos el canal normal
 )
 logger = logging.getLogger(__name__)
 
