@@ -187,6 +187,37 @@ def stats():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/historial')
+def historial():
+    try:
+        conn = psycopg2.connect(DB_URL)
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        # Traemos los últimos 50 registros (equivale a las últimas 10 lecturas completas)
+        cur.execute("SELECT * FROM predicciones_log ORDER BY id DESC LIMIT 50")
+        logs = cur.fetchall()
+        cur.close()
+        conn.close()
+        
+        hist = []
+        # Agrupamos de 5 en 5 porque tienes 5 sensores por cada lectura
+        for i in range(0, len(logs), 5):
+            g = logs[i:i+5]
+            if g: 
+                # Aseguramos que la fecha sea compatible con JSON (texto)
+                fecha = g[0].get('fecha')
+                fecha_str = fecha.isoformat() if hasattr(fecha, 'isoformat') else str(fecha)
+                
+                hist.append({
+                    "nombre": "Análisis IA", 
+                    "fecha": fecha_str, 
+                    "datos": g
+                })
+                
+        return jsonify(hist)
+    except Exception as e:
+        logger.error(f"Error cargando historial: {e}")
+        return jsonify({"error": str(e)}), 500        
+
 @app.route('/api/descargar-cerebro', methods=['GET'])
 def descargar_cerebro():
     """Descarga el archivo del modelo de IA (.joblib) directamente a tu PC"""
