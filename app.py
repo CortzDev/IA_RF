@@ -11,10 +11,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
-# Configuración de variables
-DB_URL = os.environ.get("DATABASE_URL")
-if not DB_URL:
-    raise ValueError("⚠️ No se encontró la variable DATABASE_URL.")
+# Configuración de variables con la URL directa
+DB_URL = "postgresql://postgres:VaLqxGBzdzZmBTddchzzryKgNeQmoPfI@switchback.proxy.rlwy.net:14573/railway?sslmode=require"
 
 sensores = ['temp_current', 'humidity_value', 'co2_value', 'pm25_value', 'pm10']
 RUTA_MODELO = '/app/data/cerebro_sensores.joblib'
@@ -130,7 +128,7 @@ app = FastAPI(title="API Sensores IA")
 # Permite que tu HTML consulte esta API sin bloqueos de seguridad (CORS)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # En producción puedes poner aquí la URL de tu HTML
+    allow_origins=["*"], 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
