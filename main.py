@@ -125,7 +125,6 @@ def fusion_ia_monitor():
 # ==========================================
 app = FastAPI(title="API Sensores IA")
 
-# Permite que tu HTML consulte esta API sin bloqueos de seguridad (CORS)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], 
@@ -140,7 +139,6 @@ def home():
 
 @app.get("/api/estadisticas")
 def obtener_estadisticas():
-    # Esta es la ruta a la que tu HTML hará la petición
     try:
         conn = psycopg2.connect(DB_URL)
         cursor = conn.cursor(cursor_factory=RealDictCursor)
@@ -162,15 +160,49 @@ def obtener_estadisticas():
     except Exception as e:
         return {"error": str(e)}
 
+# --- NUEVA RUTA PARA EL HISTORIAL INTERACTIVO ---
+@app.get("/api/historial")
+def obtener_historial():
+    try:
+        conn = psycopg2.connect(DB_URL)
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        
+        # Traemos los últimos 50 registros (equivale a las últimas 10 predicciones de 5 sensores)
+        cursor.execute("""
+            SELECT sensor, valor_real, valor_predicho, margen_error, acertado, fecha
+            FROM predicciones_log
+            ORDER BY id DESC
+            LIMIT 50;
+        """)
+        logs = cursor.fetchall()
+        cursor.close()
+        conn.close()
+
+        # Agrupamos los datos de 5 en 5
+        historial_agrupado = []
+        numero_prediccion = len(logs) // 5
+
+        for i in range(0, len(logs), 5):
+            grupo = logs[i:i+5]
+            if len(grupo) > 0:
+                historial_agrupado.append({
+                    "nombre": f"Predicción #{numero_prediccion}",
+                    "fecha": grupo[0]['fecha'],
+                    "datos": grupo
+                })
+                numero_prediccion -= 1
+                
+        return historial_agrupado
+    except Exception as e:
+        return {"error": str(e)}
+
 # ==========================================
 # 3. ARRANQUE DEL SISTEMA UNIFICADO
 # ==========================================
 if __name__ == "__main__":
-    # 1. Arrancamos el motor de la IA en un "hilo" de fondo para que no bloquee
     hilo_ia = threading.Thread(target=fusion_ia_monitor, daemon=True)
     hilo_ia.start()
     
-    # 2. Arrancamos el servidor web en el puerto que asigne Railway
     puerto = int(os.environ.get("PORT", 8000))
     print(f"🌐 Iniciando servidor web en el puerto {puerto}...")
     uvicorn.run(app, host="0.0.0.0", port=puerto)
