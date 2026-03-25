@@ -1,0 +1,4 @@
+cerebro_sensores.joblib
+*.joblib
+__pycache__/
+*.pyc
