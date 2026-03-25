@@ -1,7 +1,7 @@
+Flask
+flask-cors
 pandas
 psycopg2-binary
 SQLAlchemy
 scikit-learn
 joblib
-fastapi
-uvicorn

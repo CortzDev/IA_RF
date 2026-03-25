@@ -1,4 +1,14 @@
-cerebro_sensores.joblib
-*.joblib
+# Ignorar archivos de Python compilados
 __pycache__/
 *.pyc
+
+# Ignorar entornos virtuales (si usas uno localmente)
+venv/
+env/
+
+# IGNORAR EL CEREBRO DE LA IA
+*.joblib
+cerebro_sensores.joblib
+
+# Ignorar variables de entorno locales
+.env
